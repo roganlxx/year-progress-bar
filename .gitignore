@@ -1,0 +1,6 @@
+.env
+node_modules/
+out/
+host/
+__pycache__/
+.vercel/
