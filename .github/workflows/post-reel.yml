@@ -1,0 +1,68 @@
+name: post-reel
+
+on:
+  schedule:
+    - cron: "23 * * * *" # 매시 23분에 게이트 체크, 실제 게시는 state/next_run.txt가 결정
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "스케줄 무시하고 즉시 게시"
+        required: false
+        default: "false"
+
+concurrency:
+  group: post-reel
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 게이트 체크
+        id: gate
+        env:
+          FORCE: ${{ github.event.inputs.force }}
+        run: python3 ci/gate.py | tee -a "$GITHUB_OUTPUT"
+
+      - name: 영상 생성
+        if: steps.gate.outputs.due == 'true'
+        run: |
+          pip3 install --quiet pillow
+          which ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+          python3 make_reel.py
+
+      - name: 미디어를 Pages에 커밋
+        if: steps.gate.outputs.due == 'true'
+        run: |
+          DATE=$(date +%F)
+          mkdir -p docs/media
+          cp "out/year-progress-$DATE.mp4" "docs/media/$DATE.mp4"
+          git config user.name "yp-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/media
+          git commit -m "media: $DATE" || echo "변경 없음"
+          git pull --rebase && git push
+
+      - name: Pages 배포 대기
+        if: steps.gate.outputs.due == 'true'
+        run: python3 ci/wait_url.py "https://roganlxx.github.io/year-progress-bar/media/$(date +%F).mp4"
+
+      - name: 발행 + 토큰 갱신 + 다음 시각 추첨
+        if: steps.gate.outputs.due == 'true'
+        env:
+          TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
+        run: python3 ci/publish_and_rotate.py "https://roganlxx.github.io/year-progress-bar/media/$(date +%F).mp4"
+
+      - name: 상태 커밋
+        if: steps.gate.outputs.due == 'true'
+        run: |
+          git add state
+          git commit -m "state: next run"
+          git pull --rebase && git push
