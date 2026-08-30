@@ -94,7 +94,9 @@ def draw_frame(n_off: float, elapsed: int, total: int, year: int,
     d = ImageDraw.Draw(img)
 
     # 상단(릴스 UI가 안 가리는 구간): 연도가 히어로, 그 아래 퍼센트와 날짜
-    pct = n_off / total * 100
+    blink_idx = max(elapsed - 1, 0)          # 스윕 종결점 = 깜빡이는 점
+    final_pct = elapsed / total * 100
+    pct = final_pct if blink_idx == 0 else final_pct * min(1.0, n_off / blink_idx)
     # 숫자 자간 -4%: 첫 게시물(Helvetica Neue Bold)의 인상에 맞춤
     text_tracked(d, (W / 2, 335), str(year), font(150), YEAR_COLOR,
                  tracking_em=-0.04)
@@ -108,12 +110,12 @@ def draw_frame(n_off: float, elapsed: int, total: int, year: int,
         c, rw = i % COLS, i // COLS
         x, y = gx + c * GAP, GY + rw * GAP
 
-        if i < elapsed:
+        if i < blink_idx:
             # 지나간 날: n_off를 지나면 꺼진다 (1도트 폭으로 페이드)
             u = n_off - i
             color = lerp(YELLOW, TRACK, u)
-        elif i == elapsed:
-            # 오늘: 커서처럼 깜빡인다
+        elif i == blink_idx:
+            # 스윕이 멈춘 자리: 커서처럼 깜빡인다
             color = YELLOW if blink_on else TRACK
         else:
             color = YELLOW
@@ -158,8 +160,11 @@ def build_audio(elapsed: int, path: Path):
         inner = max(2 ** -9, 1 - y * denom)
         return HOLD_IN_SEC + SWEEP_SEC * (-math.log2(inner) / 9)
 
+    if elapsed <= 0:
+        # 꺼질 도트가 없으면 초침만
+        pass
     last_t = -1.0
-    for i in range(elapsed - 1):
+    for i in range(max(elapsed - 1, 0)):
         t0 = t_off(i)
         if t0 - last_t < 0.025:   # 틱 최소 간격 (촘촘함 절반으로)
             continue
@@ -213,6 +218,8 @@ def main():
         shutil.rmtree(FRAMES)
     FRAMES.mkdir(parents=True)
 
+    off_total = max(elapsed - 1, 0)   # 깜빡이는 점 직전까지만 끈다
+
     f_in = int(HOLD_IN_SEC * FPS)
     f_sweep = int(SWEEP_SEC * FPS)
 
@@ -221,10 +228,10 @@ def main():
             n_off, blink_on = 0.0, True
         elif f < f_in + f_sweep:
             t = (f - f_in) / f_sweep
-            n_off = elapsed * ease_out_expo(t)
+            n_off = off_total * ease_out_expo(t)
             blink_on = True
         else:
-            n_off = float(elapsed)
+            n_off = float(off_total)
             t_hold = (f - f_in - f_sweep) / FPS
             blink_on = (t_hold % 1.0) < 0.55  # 1초 주기 커서 깜빡임
 
@@ -233,7 +240,7 @@ def main():
 
     suffix = "-dark" if DARK else ""
     audio_wav = FRAMES / "audio.wav"
-    build_audio(elapsed, audio_wav)
+    build_audio(off_total, audio_wav)
 
     out_mp4 = OUT / f"year-progress-{day.isoformat()}{suffix}.mp4"
     subprocess.run(
@@ -254,7 +261,7 @@ def main():
     )
 
     still = OUT / f"year-progress-{day.isoformat()}{suffix}.png"
-    draw_frame(float(elapsed), elapsed, total, day.year, label, True).save(
+    draw_frame(float(off_total), elapsed, total, day.year, label, True).save(
         still)
 
     shutil.rmtree(FRAMES)
