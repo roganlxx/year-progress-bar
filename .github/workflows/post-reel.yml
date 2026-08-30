@@ -31,23 +31,28 @@ jobs:
           FORCE: ${{ github.event.inputs.force }}
         run: python3 ci/gate.py | tee -a "$GITHUB_OUTPUT"
 
-      - name: 영상 생성
+      - name: 영상 준비 (미리 만든 것 우선, 없으면 생성)
         if: steps.gate.outputs.due == 'true'
         run: |
-          pip3 install --quiet pillow
-          which ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
-          python3 make_reel.py
+          DATE=$(date +%F)
+          if [ -f "docs/media/$DATE.mp4" ]; then
+            echo "미리 생성된 영상 사용: docs/media/$DATE.mp4"
+          else
+            echo "미리 만든 영상이 없어 즉석 생성합니다"
+            pip3 install --quiet pillow
+            which ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+            python3 make_reel.py
+            mkdir -p docs/media
+            cp "out/year-progress-$DATE.mp4" "docs/media/$DATE.mp4"
+          fi
 
       - name: 미디어를 Pages에 커밋
         if: steps.gate.outputs.due == 'true'
         run: |
-          DATE=$(date +%F)
-          mkdir -p docs/media
-          cp "out/year-progress-$DATE.mp4" "docs/media/$DATE.mp4"
           git config user.name "yp-bot"
           git config user.email "actions@users.noreply.github.com"
           git add docs/media
-          git commit -m "media: $DATE" || echo "변경 없음"
+          git commit -m "media: $(date +%F)" || echo "변경 없음 (미리 커밋된 영상 사용)"
           git pull --rebase && git push
 
       - name: Pages 배포 대기

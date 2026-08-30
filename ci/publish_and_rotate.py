@@ -29,8 +29,10 @@ NEXT_RUN = STATE / "next_run.txt"
 LOG = STATE / "log.csv"
 IG_USER_ID = (STATE / "ig_user_id.txt").read_text().strip()
 
-MIN_HOURS, MAX_HOURS = 85, 131
-DAILY_UNTIL_FOLLOWERS = 100   # 팔로워가 이 수를 넘기 전까지는 24시간 간격
+# 4일 간격으로 넘어가는 조건: 10월 1일 이후 + 팔로워 100명 이상.
+# 둘 중 하나라도 미달이면 매일 1회.
+EVERY4_FROM = dt.date(2026, 10, 1)
+EVERY4_MIN_FOLLOWERS = 100
 
 
 def openssl(args, input_bytes):
@@ -118,7 +120,7 @@ def main():
     encrypt_token(ref["access_token"])
     print(f"토큰 갱신 완료 (유효 {ref['expires_in'] // 86400}일)")
 
-    # 팔로워 100명 전까지는 매일 1회, 그 후엔 85~131시간 랜덤
+    # 10월 1일 이후이면서 팔로워 100명 이상일 때만 4일 간격, 아니면 매일
     followers = None
     try:
         req = urllib.request.Request(
@@ -128,15 +130,19 @@ def main():
         with urllib.request.urlopen(req, timeout=30) as r:
             followers = json.loads(r.read()).get("followers_count")
     except Exception as e:
-        print(f"팔로워 조회 실패({e}) → 일단 24시간 간격 유지")
+        print(f"팔로워 조회 실패({e}) → 매일 모드 유지")
 
-    if followers is None or followers < DAILY_UNTIL_FOLLOWERS:
-        hours = 24.0
-        print(f"팔로워 {followers}명 (<{DAILY_UNTIL_FOLLOWERS}) → 매일 모드")
+    now = dt.datetime.now(dt.timezone.utc)
+    date_ok = now.date() >= EVERY4_FROM
+    follow_ok = followers is not None and followers >= EVERY4_MIN_FOLLOWERS
+    if date_ok and follow_ok:
+        hours = 96.0
+        print(f"4일 간격 모드 (팔로워 {followers}명)")
     else:
-        hours = random.uniform(MIN_HOURS, MAX_HOURS)
-        print(f"팔로워 {followers}명 (>={DAILY_UNTIL_FOLLOWERS}) → 랜덤 모드")
-    nxt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=hours)
+        hours = 24.0
+        print(f"매일 모드 (팔로워 {followers}명, "
+              f"10월 이후={date_ok}, 100명 이상={follow_ok})")
+    nxt = now + dt.timedelta(hours=hours)
     NEXT_RUN.write_text(nxt.isoformat())
     print(f"다음 게시: {nxt.isoformat()} ({hours:.1f}시간 후)")
 
