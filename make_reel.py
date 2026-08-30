@@ -160,22 +160,26 @@ def build_audio(elapsed: int, path: Path):
         inner = max(2 ** -9, 1 - y * denom)
         return HOLD_IN_SEC + SWEEP_SEC * (-math.log2(inner) / 9)
 
-    if elapsed <= 0:
-        # 꺼질 도트가 없으면 초침만
-        pass
-    last_t = -1.0
-    for i in range(max(elapsed - 1, 0)):
-        t0 = t_off(i)
-        if t0 - last_t < 0.025:   # 틱 최소 간격 (촘촘함 절반으로)
-            continue
-        last_t = t0
-        prog = i / elapsed
-        freq = 240 - 120 * prog + rnd.uniform(-10, 10)
-        amp = 0.11 + 0.11 * prog
-        add_tone(t0, freq, 0.014 + 0.012 * prog, amp, noise=0.35)
+    # 연속 래칫: 도트 개별 시각 대신 시간축을 직접 걸어가며
+    # 틱 간격을 순간 꺼짐 속도의 역수로 잡는다 → 간격이 매끄럽게 단조 증가.
+    if elapsed > 0:
+        LN2_9 = 9 * math.log(2)
+        t_end = HOLD_IN_SEC + SWEEP_SEC
+        tcur = HOLD_IN_SEC + 0.001
+        while tcur < t_end - 0.01:
+            u = (tcur - HOLD_IN_SEC) / SWEEP_SEC
+            prog = (1 - 2 ** (-9 * u)) / denom          # 0~1 진행률
+            rate = elapsed * (LN2_9 * 2 ** (-9 * u) / denom) / SWEEP_SEC
+            gap = max(0.025, 1.0 / max(rate, 1e-9))
+            freq = 240 - 120 * prog + rnd.uniform(-10, 10)
+            amp = 0.11 + 0.11 * prog
+            add_tone(tcur, freq, 0.014 + 0.012 * prog, amp, noise=0.35)
+            if gap > 0.8:
+                break
+            tcur += gap
 
-    # 마지막 도트: 낮고 묵직하게
-    add_tone(t_off(elapsed - 1), 45, 0.22, 0.6)
+        # 종결점: 낮고 묵직하게 (스윕이 끝나는 순간)
+        add_tone(t_end, 45, 0.22, 0.6)
 
     # 홀드 구간: 깜빡임과 동기화된 초침 (켜질 때 똑, 꺼질 때 여린 딱)
     t_hold0 = HOLD_IN_SEC + SWEEP_SEC
