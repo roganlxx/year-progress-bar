@@ -95,10 +95,11 @@ def draw_frame(n_off: float, elapsed: int, total: int, year: int,
 
     # 상단(릴스 UI가 안 가리는 구간): 연도가 히어로, 그 아래 퍼센트와 날짜
     pct = n_off / total * 100
-    d.text((W / 2, 335), str(year), font=font(150), fill=YEAR_COLOR,
-           anchor="mm")
-    d.text((W / 2, 490), f"{pct:.1f}%", font=font(115), fill=YELLOW,
-           anchor="mm")
+    # 숫자 자간 -4%: 첫 게시물(Helvetica Neue Bold)의 인상에 맞춤
+    text_tracked(d, (W / 2, 335), str(year), font(150), YEAR_COLOR,
+                 tracking_em=-0.04)
+    text_tracked(d, (W / 2, 490), f"{pct:.1f}%", font(115), YELLOW,
+                 tracking_em=-0.04)
     text_tracked(d, (W / 2, 585), label, font(44, FONT_MEDIUM), DIM,
                  tracking_em=-0.05)
 
