@@ -23,13 +23,22 @@ jobs:
     env:
       TZ: Asia/Seoul
     steps:
+      # ref 없이 두면 크론이 예약된 시점의 SHA가 박혀, 지연/큐 대기 중
+      # 앞 실행이 push한 state/를 못 보고 낡은 next_run으로 중복 게시한다.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: 게이트 체크
         id: gate
         env:
           FORCE: ${{ github.event.inputs.force }}
-        run: python3 ci/gate.py | tee -a "$GITHUB_OUTPUT"
+        # 파이프를 쓰면(기본 셸은 pipefail 미적용) gate.py가 죽어도 step이
+        # 성공으로 남고 due가 비어 모든 step이 skip된다 → 조용히 게시 정지.
+        run: |
+          python3 ci/gate.py > gate.out
+          cat gate.out >> "$GITHUB_OUTPUT"
+          cat gate.out
 
       - name: 영상 준비 (미리 만든 것 우선, 없으면 생성)
         if: steps.gate.outputs.due == 'true'
@@ -65,9 +74,29 @@ jobs:
           TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
         run: python3 ci/publish_and_rotate.py "https://roganlxx.github.io/year-progress-bar/media/$(date +%F).mp4"
 
+      # always(): 발행 step이 실패해도 릴스는 이미 올라갔을 수 있다.
+      # 그때 state를 push하지 않으면 다음 크론이 같은 릴스를 또 올린다.
       - name: 상태 커밋
-        if: steps.gate.outputs.due == 'true'
+        if: always() && steps.gate.outputs.due == 'true'
         run: |
-          git add state
-          git commit -m "state: next run"
-          git pull --rebase && git push
+          git config user.name "yp-bot"
+          git config user.email "actions@users.noreply.github.com"
+          # 앞 step이 rebase 도중 죽었을 수 있으니 정리하고 시작한다.
+          git rebase --abort 2>/dev/null || true
+          # state/는 CI가 소유자라 last-writer-wins가 맞다. 인덱스를 origin에
+          # 맞춘 뒤(--mixed) state/만 add해 충돌 없이 이번 값을 얹는다.
+          # --soft를 쓰면 인덱스가 낡은 채 남아 남의 커밋 파일까지 지워 버린다.
+          # --ignore-removal: reset 뒤 인덱스에는 origin의 state/ 파일이 모두
+          # 들어오므로, 러너에 없는 파일(예: 사람이 방금 올린 state/notes.md)이
+          # 삭제로 스테이징되는 것을 막는다. CI는 state 파일을 지우지 않는다.
+          for i in 1 2 3; do
+            git fetch origin main \
+              && git reset --mixed origin/main \
+              && git add --ignore-removal state \
+              && { git diff --cached --quiet || git commit -m "state: next run"; } \
+              && git push origin HEAD:main \
+              && exit 0
+            echo "상태 push 재시도 $i"
+            sleep 10
+          done
+          exit 1
